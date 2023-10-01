@@ -8,13 +8,6 @@ export { compileScript } from './compileScript'
 export { rewriteDefault, rewriteDefaultAST } from './rewriteDefault'
 export { resolveTypeElements, inferRuntimeType } from './script/resolveType'
 
-// TODO remove in 3.4
-export {
-  shouldTransform as shouldTransformRef,
-  transform as transformRef,
-  transformAST as transformRefAST
-} from '@vue/reactivity-transform'
-
 // Utilities
 export { parse as babelParse } from '@babel/parser'
 import MagicString from 'magic-string'
