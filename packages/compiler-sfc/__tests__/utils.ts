@@ -25,7 +25,7 @@ export function assertCode(code: string) {
   try {
     babelParse(code, {
       sourceType: 'module',
-      plugins: ['typescript']
+      plugins: ['typescript', 'jsx']
     })
   } catch (e: any) {
     console.log(code)
