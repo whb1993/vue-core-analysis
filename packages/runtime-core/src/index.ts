@@ -72,6 +72,7 @@ export {
   defineOptions,
   defineSlots,
   defineModel,
+  defineRender,
   withDefaults,
   useModel
 } from './apiSetupHelpers'
