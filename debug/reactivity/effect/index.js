@@ -1,3 +1,4 @@
+import { ITERATE_KEY } from '../proxy/index.js'
 /**
  * 用一个全局变量存储 需要执行 副作用函数
  * 多个effect方法 activeEffect 有多个
@@ -35,7 +36,7 @@ export const track = (target, key) => {
   // 记录 副作用 方法
   const set = keyObj.get(key)
   set.add(activeEffect)
-  activeEffect.deps.push(set)
+  activeEffect?.deps.push(set)
 }
 
 /**
@@ -43,8 +44,14 @@ export const track = (target, key) => {
  * @param {*} 代理的对象
  * @param {*} key 代理对象关注的key值
  */
-export const trigger = (target, key) => {
-  const set = bucket.get(target)?.get(key)
+export const trigger = (target, key, type) => {
+  const depsMap = bucket.get(target)
+  if (!depsMap) {
+    return
+  }
+  const set = depsMap.get(key)
+
+  const inerateEffects = depsMap.get(ITERATE_KEY)
 
   // 避免删除
   const tem = new Set(set)
@@ -59,6 +66,16 @@ export const trigger = (target, key) => {
         needRun.add(autoEffectFn)
       }
     })
+
+  if (type === 'ADD' || type === 'DELETE') {
+    inerateEffects &&
+      inerateEffects.forEach(autoEffectFn => {
+        if (autoEffectFn !== activeEffect) {
+          needRun.add(autoEffectFn)
+        }
+      })
+  }
+
   needRun.forEach(autoEffectFn => {
     // 如果有调度器
     if (autoEffectFn.option.scheduler) {
