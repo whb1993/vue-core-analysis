@@ -18,6 +18,40 @@ const data = { text: 'hello world', flag: true, foo: 0, bar: 0, num: 0 }
  */
 const bucket = new WeakMap()
 
+export const arrayInstrumentations = {}
+;['includes', 'indexOf', 'lastIndexOf'].forEach(method => {
+  const originMethod = Array.prototype[method]
+  arrayInstrumentations[method] = function (...args) {
+    // this 是代理对象，先在代理对象中查找，将结果存储到 res 中
+    let res = originMethod.apply(this, args)
+
+    if (res === false || res === -1) {
+      // res 为 false 说明没找到，通过 this.raw 拿到原始数组，再去其中查找，并更新 res 值
+      res = originMethod.apply(this.raw, args)
+    }
+    // 返回最终结果
+    return res
+  }
+})
+
+// 一个标记变量，代表是否进行追踪。默认值为 true，即允许追踪
+let shouldTrack = true
+// 重写数组的 push 方法
+;['push', 'pop', 'shift', 'unshift', 'splice'].forEach(method => {
+  // 取得原始 push 方法
+  const originMethod = Array.prototype[method]
+  // 重写
+  arrayInstrumentations[method] = function (...args) {
+    // 在调用原始方法之前，禁止追踪
+    shouldTrack = false
+    // push 方法的默认行为
+    let res = originMethod.apply(this, args)
+    // 在调用原始方法之后，恢复原来的行为，即允许追踪
+    shouldTrack = true
+    return res
+  }
+})
+
 /**
  * 记录需要跟踪的值
  * @param {*} target 代理的对象
@@ -36,7 +70,9 @@ export const track = (target, key) => {
   // 记录 副作用 方法
   const set = keyObj.get(key)
   set.add(activeEffect)
-  activeEffect?.deps.push(set)
+  if (shouldTrack) {
+    activeEffect?.deps.push(set)
+  }
 }
 
 /**
@@ -44,7 +80,7 @@ export const track = (target, key) => {
  * @param {*} 代理的对象
  * @param {*} key 代理对象关注的key值
  */
-export const trigger = (target, key, type) => {
+export const trigger = (target, key, type, newVal) => {
   const depsMap = bucket.get(target)
   if (!depsMap) {
     return
@@ -74,6 +110,34 @@ export const trigger = (target, key, type) => {
           needRun.add(autoEffectFn)
         }
       })
+  }
+
+  // 当操作类型为 ADD 并且目标对象是数组时，应该取出并执行那些与 length 属性相关联的副作用函数
+  if (type === 'ADD' && Array.isArray(target)) {
+    // 取出与 length 相关联的副作用函数
+    const lengthEffects = depsMap.get('length')
+    // 将这些副作用函数添加到 effectsToRun 中，待执行
+    lengthEffects &&
+      lengthEffects.forEach(effectFn => {
+        if (effectFn !== activeEffect) {
+          needRun.add(effectFn)
+        }
+      })
+  }
+
+  // 如果操作目标是数组，并且修改了数组的 length 属性
+  if (Array.isArray(target) && key === 'length') {
+    // 对于索引大于或等于新的 length 值的元素，
+    // 需要把所有相关联的副作用函数取出并添加到 effectsToRun 中待执行
+    depsMap.forEach((effects, key) => {
+      if (key >= newVal) {
+        effects.forEach(effectFn => {
+          if (effectFn !== activeEffect) {
+            needRun.add(effectFn)
+          }
+        })
+      }
+    })
   }
 
   needRun.forEach(autoEffectFn => {
