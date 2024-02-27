@@ -1,4 +1,4 @@
-import { ITERATE_KEY } from '../proxy/index.js'
+import { ITERATE_KEY, reactive } from '../proxy/index_reactive.js'
 /**
  * 用一个全局变量存储 需要执行 副作用函数
  * 多个effect方法 activeEffect 有多个
@@ -34,6 +34,84 @@ export const arrayInstrumentations = {}
   }
 })
 
+// 定义一个对象，将自定义的 add 方法定义到该对象下
+export const mutableInstrumentations = {
+  add(key) {
+    // this 仍然指向的是代理对象，通过 raw 属性获取原始数据对象
+    const target = this.raw
+    // 通过原始数据对象执行 add 方法添加具体的值，
+    // 注意，这里不再需要 .bind 了，因为是直接通过 target 调用并执行的
+    // const res = target.add(key)
+
+    // 先判断值是否已经存在
+    const hadKey = target.has(key)
+    // 只有在值不存在的情况下，才需要触发响应
+    const res = target.add(key)
+    if (!hadKey) {
+      trigger(target, key, 'ADD')
+    }
+    // 返回操作结果
+    return res
+  },
+  delete(key) {
+    const target = this.raw
+    const hadKey = target.has(key)
+    const res = target.delete(key)
+    // 当要删除的元素确实存在时，才触发响应
+    if (hadKey) {
+      trigger(target, key, 'DELETE')
+    }
+    return res
+  },
+  get(key) {
+    // 获取原始对象
+    const target = this.raw
+    // 判断读取的 key 是否存在
+    const had = target.has(key)
+    // 追踪依赖，建立响应联系
+    track(target, key)
+    // 如果存在，则返回结果。这里要注意的是，如果得到的结果 res 仍然是可代理的数据，
+    // 则要返回使用 reactive 包装后的响应式数据
+    if (had) {
+      const res = target.get(key)
+      return typeof res === 'object' ? reactive(res) : res
+    }
+  },
+  set(key, value) {
+    const target = this.raw
+    const had = target.has(key)
+    // 获取旧值
+    const oldValue = target.get(key)
+    // 获取原始数据，由于 value 本身可能已经是原始数据，所以此时 value.raw 不存在，则直接使用 value
+    const rawValue = value.raw || value
+    // 设置新值
+    target.set(key, rawValue)
+    // 如果不存在，则说明是 ADD 类型的操作，意味着新增
+    if (!had) {
+      trigger(target, key, 'ADD')
+    } else if (
+      oldValue !== value ||
+      (oldValue === oldValue && value === value)
+    ) {
+      // 如果不存在，并且值变了，则是 SET 类型的操作，意味着修改
+      trigger(target, key, 'SET')
+    }
+  },
+
+  forEach(callback, thisArg) {
+    // wrap 函数用来把可代理的值转换为响应式数据
+    const wrap = val => (typeof val === 'object' ? reactive(val) : val)
+    const target = this.raw
+    track(target, ITERATE_KEY)
+    // 通过 target 调用原始 forEach 方法进行遍历
+    target.forEach((v, k) => {
+      // 手动调用 callback，用 wrap 函数包裹 value 和 key 后再传给 callback，这样就实现了深响应
+
+      // 通过 .call 调用 callback，并传递 thisArg
+      callback.call(thisArg, wrap(v), wrap(k), this)
+    })
+  }
+}
 // 一个标记变量，代表是否进行追踪。默认值为 true，即允许追踪
 let shouldTrack = true
 // 重写数组的 push 方法
@@ -103,11 +181,18 @@ export const trigger = (target, key, type, newVal) => {
       }
     })
 
-  if (type === 'ADD' || type === 'DELETE') {
+  if (
+    type === 'ADD' ||
+    type === 'DELETE' ||
+    // 如果操作类型是 SET，并且目标对象是 Map 类型的数据，
+    // 也应该触发那些与 ITERATE_KEY 相关联的副作用函数重新执行
+    (type === 'SET' &&
+      Object.prototype.toString.call(target) === '[object Map]')
+  ) {
     inerateEffects &&
-      inerateEffects.forEach(autoEffectFn => {
-        if (autoEffectFn !== activeEffect) {
-          needRun.add(autoEffectFn)
+      inerateEffects.forEach(effectFn => {
+        if (effectFn !== activeEffect) {
+          needRun.add(effectFn)
         }
       })
   }
