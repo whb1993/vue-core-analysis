@@ -1,4 +1,8 @@
-import { ITERATE_KEY, reactive } from '../proxy/index_reactive.js'
+import {
+  ITERATE_KEY,
+  MAP_KEY_ITERATE_KEY,
+  reactive
+} from '../proxy/index_reactive.js'
 /**
  * 用一个全局变量存储 需要执行 副作用函数
  * 多个effect方法 activeEffect 有多个
@@ -110,8 +114,89 @@ export const mutableInstrumentations = {
       // 通过 .call 调用 callback，并传递 thisArg
       callback.call(thisArg, wrap(v), wrap(k), this)
     })
+  },
+
+  // 共用 iterationMethod 方法
+  [Symbol.iterator]: iterationMethod,
+  entries: iterationMethod,
+  values: valuesIterationMethod,
+  keys: keysIterationMethod
+}
+
+function keysIterationMethod() {
+  // 获取原始数据对象 target
+  const target = this.raw
+  // 通过 target.values 获取原始迭代器方法
+  const itr = target.keys()
+
+  const wrap = val => (typeof val === 'object' ? reactive(val) : val)
+
+  track(target, MAP_KEY_ITERATE_KEY)
+
+  // 将其返回
+  return {
+    next() {
+      const { value, done } = itr.next()
+      return {
+        // value 是值，而非键值对，所以只需要包裹 value 即可
+        value: wrap(value),
+        done
+      }
+    },
+    [Symbol.iterator]() {
+      return this
+    }
   }
 }
+function valuesIterationMethod() {
+  // 获取原始数据对象 target
+  const target = this.raw
+  // 通过 target.values 获取原始迭代器方法
+  const itr = target.values()
+
+  const wrap = val => (typeof val === 'object' ? reactive(val) : val)
+
+  track(target, ITERATE_KEY)
+
+  // 将其返回
+  return {
+    next() {
+      const { value, done } = itr.next()
+      return {
+        // value 是值，而非键值对，所以只需要包裹 value 即可
+        value: wrap(value),
+        done
+      }
+    },
+    [Symbol.iterator]() {
+      return this
+    }
+  }
+}
+
+// 抽离为独立的函数，便于复用
+function iterationMethod() {
+  const target = this.raw
+  const itr = target[Symbol.iterator]()
+
+  const wrap = val => (typeof val === 'object' ? reactive(val) : val)
+
+  track(target, ITERATE_KEY)
+
+  return {
+    next() {
+      const { value, done } = itr.next()
+      return {
+        value: value ? [wrap(value[0]), wrap(value[1])] : value,
+        done
+      }
+    },
+    [Symbol.iterator]() {
+      return this
+    }
+  }
+}
+
 // 一个标记变量，代表是否进行追踪。默认值为 true，即允许追踪
 let shouldTrack = true
 // 重写数组的 push 方法
@@ -193,6 +278,22 @@ export const trigger = (target, key, type, newVal) => {
       inerateEffects.forEach(effectFn => {
         if (effectFn !== activeEffect) {
           needRun.add(effectFn)
+        }
+      })
+  }
+
+  if (
+    // 操作类型为 ADD 或 DELETE
+    (type === 'ADD' || type === 'DELETE') &&
+    // 并且是 Map 类型的数据
+    Object.prototype.toString.call(target) === '[object Map]'
+  ) {
+    // 则取出那些与 MAP_KEY_ITERATE_KEY 相关联的副作用函数并执行
+    const iterateEffects = depsMap.get(MAP_KEY_ITERATE_KEY)
+    iterateEffects &&
+      iterateEffects.forEach(effectFn => {
+        if (effectFn !== activeEffect) {
+          effectsToRun.add(effectFn)
         }
       })
   }

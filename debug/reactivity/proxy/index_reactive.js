@@ -6,6 +6,8 @@ import {
 } from '../effect/index.js'
 
 export const ITERATE_KEY = Symbol('iterate')
+export const MAP_KEY_ITERATE_KEY = Symbol()
+
 // 定义一个 Map 实例，存储原始对象到代理对象的映射
 const reactiveMap = new Map()
 
