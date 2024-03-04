@@ -71,7 +71,6 @@ function toRefs(obj) {
   return ret
 }
 const newObj = { ...toRefs(obj) }
-
 effect(() => {
   // 在副作用函数内通过新的对象 newObj 读取 foo 属性值
   console.log(newObj.foo.value)
@@ -85,13 +84,13 @@ function proxyRefs(target) {
   return new Proxy(target, {
     get(target, key, receiver) {
       const value = Reflect.get(target, key, receiver)
-      return value.__v_isRef ? value.value : value
+      return value?.__v_isRef ? value.value : value
     },
     set(target, key, newValue, receiver) {
       // 通过 target 读取真实值
       const value = target[key]
       // 如果值是 Ref，则设置其对应的 value 属性值
-      if (value.__v_isRef) {
+      if (value?.__v_isRef) {
         value.value = newValue
         return true
       }
@@ -103,3 +102,18 @@ function proxyRefs(target) {
 const newObj1 = proxyRefs({ ...toRefs(obj) })
 
 console.log('new ' + newObj1.foo)
+
+// 封装一个 ref 函数
+export function ref(val) {
+  // 在 ref 函数内部创建包裹对象
+  const wrapper = {
+    value: val
+  }
+  // 使用 Object.defineProperty 在 wrapper 对象上定义一个不可枚举的属性 __v_isRef，并且值为 true
+  Object.defineProperty(wrapper, '__v_isRef', {
+    value: true
+  })
+
+  // 将包裹对象变成响应式数据
+  return reactive(wrapper)
+}
